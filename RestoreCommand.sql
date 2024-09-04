@@ -1,4 +1,4 @@
-USE MyDB; --the database where you have the Ola Hallengren scripts/tables installed.
+USE MyDB /* the database where you have the Ola Hallengren scripts/tables installed. */
 GO
 SET ANSI_NULLS ON
 GO
@@ -21,25 +21,25 @@ ALTER PROCEDURE dbo.RestoreCommand
 AS
 /*
 *********************************************************************************************
-Script for creating automated restore scripts based on Ola Hallengren's Maintenance Solution. 
+Script for creating automated restore scripts based on Ola Hallengren's Maintenance Solution.
 Source: https://ola.hallengren.com
 
-Create RestoreCommand s proc in location of Maintenance Solution procedures 
+Create RestoreCommand s proc in location of Maintenance Solution procedures
 and CommandLog table along with creating job steps.
 
 At least one full backup for all databases should be logged to CommandLog table (i.e., executed through Maintenance Solution
-created FULL backup job) for generated restore scripts to be valid. 
+created FULL backup job) for generated restore scripts to be valid.
 Restore scripts are generated based on CommandLog table, not msdb backup history.
 
 Restore script is created using ouput file. Each backup job creates a date / time stamped restore script file in separate step.
 Add a job to manage file retention if desired (I use a modified version of Ola's Output File Cleanup job).
-If possible, perform a tail log backup and add to end of restore script 
+If possible, perform a tail log backup and add to end of restore script
 in order to avoid data loss (also remove any replace options for full backups).
 
 Make sure sql agent has read / write to the directory that you want the restore script created.
 
-Script will read backup file location from @Directory value used in respective DatabaseBackup job (NULL is supported). 
-SET @LogToTable = 'Y' for all backup jobs! (This is the default).  
+Script will read backup file location from @Directory value used in respective DatabaseBackup job (NULL is supported).
+SET @LogToTable = 'Y' for all backup jobs! (This is the default).
 
 Created by Jared Zagelbaum, 2015-04-13, https://jaredzagelbaum.wordpress.com/
 For intro / tutorial see: https://jaredzagelbaum.wordpress.com/2015/04/16/automated-restore-script-output-for-ola-hallengrens-maintenance-solution/
@@ -49,13 +49,15 @@ Follow me on Twitter!: @JaredZagelbaum
 *********************************************************************************************
 2023-06-20 - Fixed problems when deploying to case-sensitive SQL Instance.
 *********************************************************************************************
+2023-09-28 - JHN - Cater for backups where files have been split (due to blob storage file size constraints
+*********************************************************************************************
 */
 SET NOCOUNT ON
 
 DECLARE @DatabaseName SYSNAME;
 DECLARE @DatabaseNamePartition SYSNAME = 'N/A';
 DECLARE @Command NVARCHAR(max);
-DECLARE @IncludeCopyOnly NVARCHAR(max) = 'Y';-- include copy only backups in restore script? Added for AlwaysOn support
+DECLARE @IncludeCopyOnly NVARCHAR(max) = 'Y';/* include copy only backups in restore script? Added for AlwaysOn support */
 DECLARE @message NVARCHAR(max);
 
 DECLARE restorecursor CURSOR FAST_FORWARD
@@ -78,71 +80,72 @@ AS (
 		,EndTime
 		,ErrorNumber
 		,ErrorMessage
-		-- Identify if disk or url location 
-		,CASE 
+		/*  Identify if disk or url location */
+		,CASE
 			WHEN Command LIKE '%TO URL%'
 				THEN 'URL'
 			ELSE 'DISK'
 			END [Location]
-		--Expanded to include forward slash(/) used in URL path
-		,CASE 
+		/* Expanded to include forward slash(/) used in URL path */
+		,CASE
 			WHEN Command LIKE '%\LOG\%'
 				THEN 'Log'
 			WHEN Command LIKE '%/LOG/%'
-				THEN 'Log' -- Added for URL
+				THEN 'Log' /* Added for URL */
 			WHEN @IncludeCopyOnly = 'Y'
 				AND Command LIKE '%\LOG_COPY_ONLY\%'
 				THEN 'Log'
 			WHEN @IncludeCopyOnly = 'Y'
 				AND Command LIKE '%/LOG_COPY_ONLY/%'
-				THEN 'Log' -- Added for URL
+				THEN 'Log' /* Added for URL */
 			WHEN Command LIKE '%\DIFF\%'
 				THEN 'Diff'
 			WHEN Command LIKE '%/DIFF/%'
-				THEN 'Diff' -- Added for URL
+				THEN 'Diff' /* Added for URL */
 			WHEN Command LIKE '%\FULL\%'
 				THEN 'Full'
 			WHEN Command LIKE '%/FULL/%'
-				THEN 'Full' -- Added for URL
+				THEN 'Full' /* Added for URL */
 			WHEN @IncludeCopyOnly = 'Y'
 				AND Command LIKE '%\FULL_COPY_ONLY\%'
 				THEN 'Full'
 			WHEN @IncludeCopyOnly = 'Y'
 				AND Command LIKE '%/FULL_COPY_ONLY/%'
-				THEN 'Full' -- Added for URL
+				THEN 'Full' /* Added for URL */
 			END BackupType
-		--Expanded to include forward slash(/) used in URL path
-		,CASE 
+		/* Expanded to include forward slash(/) used in URL path */
+		,CASE
 			WHEN Command LIKE '%\LOG\%'
 				THEN 3
 			WHEN Command LIKE '%/LOG/%'
-				THEN 3 -- Added for URL
+				THEN 3 /* Added for URL */
 			WHEN @IncludeCopyOnly = 'Y'
 				AND Command LIKE '%\LOG_COPY_ONLY\%'
 				THEN 3
 			WHEN @IncludeCopyOnly = 'Y'
 				AND Command LIKE '%/LOG_COPY_ONLY/%'
-				THEN 3 -- Added for URL
+				THEN 3 /* Added for URL */
 			WHEN Command LIKE '%\DIFF\%'
 				THEN 2
 			WHEN Command LIKE '%/DIFF/%'
-				THEN 2 -- Added for URL
+				THEN 2 /* Added for URL */
 			WHEN Command LIKE '%\FULL\%'
 				THEN 1
 			WHEN Command LIKE '%/FULL/%'
-				THEN 1 -- Added for URL
+				THEN 1 /* Added for URL */
 			WHEN @IncludeCopyOnly = 'Y'
 				AND Command LIKE '%\FULL_COPY_ONLY\%'
 				THEN 1
 			WHEN @IncludeCopyOnly = 'Y'
 				AND Command LIKE '%/FULL_COPY_ONLY/%'
-				THEN 1 -- Added for URL
+				THEN 1 /* Added for URL */
 			END BackupTypeOrder
 		,CASE CommandType
 			WHEN 'BACKUP_LOG'
-				THEN CHARINDEX('.trn', Command)
+				/* forces to find the last instance of .bak /.trn from the command string */
+				THEN LEN(Command) - CHARINDEX('nrt.', REVERSE(Command)) - 2
 			WHEN 'BACKUP_DATABASE'
-				THEN CHARINDEX('.bak', Command)
+				THEN LEN(Command) - CHARINDEX('kab.', REVERSE(Command)) - 2
 			END filechar
 		/* ****************************************************************************
 			Get BLOCKSIZE and MAXTRANSFERSIZE IF EXISTS for Azure Blob Storage
@@ -161,7 +164,7 @@ AS (
 			'BACKUP_LOG'
 			,'BACKUP_DATABASE'
 			)
-		AND EndTime IS NOT NULL -- Completed Backups Only
+		AND EndTime IS NOT NULL /* Completed Backups Only */
 		AND ErrorNumber = 0
 	)
 	,lastfull
@@ -191,9 +194,9 @@ AS (
 		SELECT FullId AS ID
 			,DatabaseName
 		FROM lastfull
-		
+
 		UNION ALL
-		
+
 		SELECT DiffId
 			,DatabaseName
 		FROM lastdiff
@@ -212,14 +215,14 @@ AS (
 AS (
 	SELECT FullId backupid
 	FROM lastfull
-	
+
 	UNION ALL
-	
+
 	SELECT DiffId backupid
 	FROM lastdiff
-	
+
 	UNION ALL
-	
+
 	SELECT logid backupid
 	FROM lastlogs
 	)
@@ -229,11 +232,11 @@ SELECT cob.DatabaseName
 		, 'BACKUP LOG', 'RESTORE LOG')
 		, 'BACKUP DATABASE', 'RESTORE DATABASE')
 		, 'TO DISK', 'FROM DISK')
-		, 'TO URL', 'FROM URL') -- ADDED FOR URL
+		, 'TO URL', 'FROM URL') /* Added for URL */
 		+ ''' WITH NORECOVERY, STATS = 5'
-		+ CASE 
+		+ CASE
 		WHEN AzureBlobStorage IS NULL
-			THEN '' --- Support Blob Storage
+			THEN '' /* Support Blob Storage */
 		ELSE ', ' + AzureBlobStorage
 		END
 		+ CASE BackupType
@@ -252,7 +255,7 @@ ORDER BY cob.DatabaseName
 	,ID
 	,BackupTypeOrder;
 
-RAISERROR ('/*****************************************************************',10,1) WITH NOWAIT
+RAISERROR ('/*****************************************************************',10,1)WITH NOWAIT
 
 SET @message = 'Emergency Script Restore for ' + @@Servername + CASE @@Servicename
 		WHEN 'MSSQLSERVER'
@@ -260,17 +263,17 @@ SET @message = 'Emergency Script Restore for ' + @@Servername + CASE @@Servicena
 		ELSE '\' + @@Servicename
 		END;
 
-RAISERROR (@message,10,1) WITH NOWAIT;
+RAISERROR (@message,10,1)WITH NOWAIT;
 
 SET @message = 'Generated ' + convert(NVARCHAR, getdate(), 9);
 
-RAISERROR (@message,10,1) WITH NOWAIT;
+RAISERROR (@message,10,1)WITH NOWAIT;
 
 SET @message = 'Script does not perform a tail log backup. Dataloss may occur, use only for emergency DR.';
 
-RAISERROR (@message,10,1) WITH NOWAIT;
+RAISERROR (@message,10,1)WITH NOWAIT;
 
-RAISERROR ('******************************************************************/',10,1) WITH NOWAIT;
+RAISERROR ('******************************************************************/',10,1)WITH NOWAIT;
 
 OPEN restorecursor;
 
@@ -287,17 +290,17 @@ BEGIN
 	BEGIN
 		SET @message = 'RESTORE DATABASE ' + '[' + @DatabaseNamePartition + ']' + ' WITH RECOVERY;';
 
-		RAISERROR (@message,10,1) WITH NOWAIT;
+		RAISERROR (@message,10,1)WITH NOWAIT;
 	END
 
 	IF @DatabaseName <> @DatabaseNamePartition
 	BEGIN
 		SET @message = CHAR(13) + CHAR(10) + '--------' + @DatabaseName + '-------------';
 
-		RAISERROR (@message,10,1) WITH NOWAIT;
+		RAISERROR (@message,10,1)WITH NOWAIT;
 	END
 
-	RAISERROR (@Command,10,1) WITH NOWAIT;
+	RAISERROR (@Command,10,1)WITH NOWAIT;
 
 	SET @DatabaseNamePartition = @DatabaseName;
 
@@ -310,12 +313,11 @@ END
 
 SET @message = 'RESTORE DATABASE ' + '[' + @DatabaseNamePartition + ']' + ' WITH RECOVERY;';
 
-RAISERROR (@message,10,1) WITH NOWAIT;
+RAISERROR (@message,10,1)WITH NOWAIT;
 
 CLOSE restorecursor;
 
 DEALLOCATE restorecursor;
 GO
-
---test the RestoreCommand sproc!
-EXEC dbo.RestoreCommand;
+/* test the RestoreCommand sproc! */
+EXEC dbo.RestoreCommand
