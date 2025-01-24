@@ -20,7 +20,7 @@ GO
 ALTER PROCEDURE dbo.RestoreCommand
 AS
 /*
-*********************************************************************************************
+***********************************************************************
 Script for creating automated restore scripts based on Ola Hallengren's Maintenance Solution.
 Source: https://ola.hallengren.com
 
@@ -44,13 +44,15 @@ SET @LogToTable = 'Y' for all backup jobs! (This is the default).
 Created by Jared Zagelbaum, 2015-04-13, https://jaredzagelbaum.wordpress.com/
 For intro / tutorial see: https://jaredzagelbaum.wordpress.com/2015/04/16/automated-restore-script-output-for-ola-hallengrens-maintenance-solution/
 Follow me on Twitter!: @JaredZagelbaum
-*********************************************************************************************
+***********************************************************************
 2019-09-13 - Lee Fisher - Added functionality to support Blob Storage as a backup location
-*********************************************************************************************
+***********************************************************************
 2023-06-20 - Fixed problems when deploying to case-sensitive SQL Instance.
-*********************************************************************************************
+***********************************************************************
 2023-09-28 - JHN - Cater for backups where files have been split (due to blob storage file size constraints
-*********************************************************************************************
+***********************************************************************
+2025-01-24 - OZ - Remove MIRROR TO clauses since not valid for Restores
+***********************************************************************
 */
 SET NOCOUNT ON
 
@@ -74,7 +76,8 @@ AS (
 		,StatisticsName
 		,PartitionNumber
 		,ExtendedInfo
-		,Command
+		,Command = LEFT(Command,CHARINDEX(N' MIRROR TO ',Command,1))
+		         + RIGHT(Command,LEN(Command) - CHARINDEX(N' WITH ',Command,1))
 		,CommandType
 		,StartTime
 		,EndTime
